@@ -86,7 +86,7 @@ func (s *Source) Fetch(ctx context.Context) (*List, error) {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	res, err := s.cfg.Client.Do(req)
+	res, err := noRedirect(s.cfg.Client).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("wireguard: fetching the list: %w", err)
 	}
@@ -138,11 +138,14 @@ func (s *Source) token(ctx context.Context) (string, error) {
 		AccessToken string `json:"access_token"`
 		Error       string `json:"error"`
 	}
-	res, err := s.cfg.Client.Do(req)
+	res, err := noRedirect(s.cfg.Client).Do(req)
 	if err != nil {
 		return "", fmt.Errorf("wireguard: asking for a token: %w", err)
 	}
 	defer res.Body.Close()
+	if res.StatusCode >= 300 && res.StatusCode < 400 {
+		return "", fmt.Errorf("wireguard: the token endpoint answered %s: a redirect, not followed", res.Status)
+	}
 	if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&out); err != nil {
 		return "", fmt.Errorf("wireguard: the token response (%s): %w", res.Status, err)
 	}
@@ -150,6 +153,17 @@ func (s *Source) token(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("wireguard: no token for the gateway (%s): %q", res.Status, out.Error)
 	}
 	return out.AccessToken, nil
+}
+
+// noRedirect is a copy of c that does not follow redirects. The token request
+// carries the gateway's client secret (Basic) and the list request its Bearer
+// token; Go re-sends Authorization (and, on 307/308, the body) to the same
+// host name on any port or scheme, so a redirect is refused, as go-authn/rp
+// does at its token endpoint (RFC 6749 3.2, RFC 9700 4.12).
+func noRedirect(c *http.Client) *http.Client {
+	hc := *c
+	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &hc
 }
 
 func getJSON(ctx context.Context, c *http.Client, u string, v any) error {
