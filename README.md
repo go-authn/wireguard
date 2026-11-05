@@ -79,6 +79,7 @@ It refuses:
 | a peer with **no subject** | it belongs to nobody |
 | a key that is not one (see above) | |
 | an issuer or token endpoint **in the clear** | the gateway's secret and the list would cross a link anybody can read; loopback is exempt |
+| a **redirect** from the token endpoint or the list | Go would re-send the Basic secret, or the Bearer token, to the same host on another port or scheme; neither request follows redirects (as go-authn/rp at its token endpoint) |
 
 ## The judge
 
