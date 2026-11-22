@@ -27,20 +27,27 @@ type SourceConfig struct {
 	ClientID, ClientSecret string
 	// Client is the HTTP client, for a proxy, a private CA or a timeout.
 	Client *http.Client
+	// FloorFile, when set, keeps the Source's [Floor] across a restart: read at
+	// NewSource (a file that is there but not a floor file is an error, not
+	// silently no floor), rewritten in one rename each time a list moves it
+	// up. Without it the floor is in memory only, and a restart takes any
+	// still-valid signed list, however old, as the first.
+	FloorFile string
 	// Now overrides the clock, for tests.
 	Now func() time.Time
 }
 
 // A Source fetches a provider's list for one gateway. It is safe for
 // concurrent use; build one at startup and keep it, since it remembers the
-// newest version it has seen.
+// newest list it has seen (across a restart too, with FloorFile).
 type Source struct {
 	cfg      SourceConfig
 	verifier *oidc.Verifier
 	tokenURL string
 
-	mu     sync.Mutex
-	newest uint64
+	mu    sync.Mutex
+	floor Floor
+	seen  bool // floor is meaningful: loaded from FloorFile or taken from a list
 }
 
 // NewSource reads the provider's configuration, as a database is pinged at
@@ -67,7 +74,15 @@ func NewSource(ctx context.Context, cfg SourceConfig) (*Source, error) {
 	if err := protected(meta.TokenEndpoint); err != nil {
 		return nil, fmt.Errorf("wireguard: the token endpoint: %w", err)
 	}
-	return &Source{cfg: cfg, verifier: v, tokenURL: meta.TokenEndpoint}, nil
+	s := &Source{cfg: cfg, verifier: v, tokenURL: meta.TokenEndpoint}
+	if cfg.FloorFile != "" {
+		f, ok, err := loadFloor(cfg.FloorFile)
+		if err != nil {
+			return nil, err
+		}
+		s.floor, s.seen = f, ok
+	}
+	return s, nil
 }
 
 // errRolledBack is a list older than one this source already took.
@@ -117,11 +132,28 @@ func (s *Source) Fetch(ctx context.Context) (*List, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if l.Version < s.newest {
-		return nil, fmt.Errorf("%w (version %d after %d)", errRolledBack, l.Version, s.newest)
+	if s.seen && !s.floor.admits(l.Version, l.IssuedAt) {
+		return nil, fmt.Errorf("%w (version %d issued %s, after %s)", errRolledBack, l.Version, l.IssuedAt.UTC().Format(time.RFC3339), s.floor)
 	}
-	s.newest = l.Version
+	next := Floor{Version: l.Version, IssuedAt: time.Unix(l.IssuedAt.Unix(), 0)}
+	if s.seen && next.String() == s.floor.String() {
+		return l, nil // the same position: nothing to keep
+	}
+	s.floor, s.seen = next, true
+	if s.cfg.FloorFile != "" {
+		if err := keepFloor(s.cfg.FloorFile, next); err != nil {
+			return l, fmt.Errorf("%w: %v", ErrFloorNotKept, err)
+		}
+	}
 	return l, nil
+}
+
+// Floor is where this Source's ordering stands: the newest list it has taken,
+// and whether it has taken or been given one.
+func (s *Source) Floor() (Floor, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.floor, s.seen
 }
 
 // token is an access token for the gateway itself (RFC 6749 4.4), its
