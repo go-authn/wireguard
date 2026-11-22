@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.1
+
+- `FloorFile` is written by `github.com/go-authn/harden/privfile`: mode 0600
+  (it had no explicit mode), and a state directory that is a symlink, belongs to
+  another user or is writable by group or others is refused (the floor is then
+  not kept, `ErrFloorNotKept`). A deployment with a group-writable state
+  directory must tighten it.
+
 ## v0.2.0
 
 - `SourceConfig.FloorFile` keeps the newest list's position (version and issue
