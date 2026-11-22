@@ -119,8 +119,9 @@ func TestADamagedFloorFileIsRefused(t *testing.T) {
 		}
 	}
 	// A directory where the file should be is unreadable, not absent.
-	if _, err := floorSource(t, p, dir); err == nil || !strings.Contains(err.Error(), "directory") {
-		t.Errorf("a directory as the floor file: %v", err)
+	// (The wording of the error is the platform's.)
+	if _, err := floorSource(t, p, dir); err == nil {
+		t.Error("a directory as the floor file was accepted")
 	}
 	// Absent is fine: first start.
 	if _, err := floorSource(t, p, filepath.Join(dir, "absent")); err != nil {
@@ -173,6 +174,22 @@ func TestTheSamePositionIsNotRewritten(t *testing.T) {
 	}
 	if _, err := s.Fetch(context.Background()); err != nil {
 		t.Errorf("the same position again tried to write: %v", err)
+	}
+}
+
+// A rename that fails leaves no temporary file behind.
+func TestAFailedRenameLeavesNoTemporaryFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "floor")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := keepFloor(target, Floor{Version: 1, IssuedAt: time.Unix(1, 0)}); err == nil {
+		t.Fatal("a directory was replaced by a file")
+	}
+	es, err := os.ReadDir(dir)
+	if err != nil || len(es) != 1 {
+		t.Errorf("entries %v, %v: want only the directory", es, err)
 	}
 }
 
