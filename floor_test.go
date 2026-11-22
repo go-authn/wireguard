@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -190,6 +191,35 @@ func TestAFailedRenameLeavesNoTemporaryFile(t *testing.T) {
 	es, err := os.ReadDir(dir)
 	if err != nil || len(es) != 1 {
 		t.Errorf("entries %v, %v: want only the directory", es, err)
+	}
+}
+
+// The floor is written owner-only, and not into a directory others can write
+// (privfile): a file there could be swapped for a forged one.
+func TestTheFloorIsPrivateAndNotKeptInAWritableDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("modes are Unix; the Windows owner-only list is privfile's")
+	}
+	dir := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f := Floor{Version: 3, IssuedAt: time.Unix(5, 0)}
+	path := filepath.Join(dir, "floor")
+	if err := keepFloor(path, f); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("floor file: %v, %v: want mode 0600", fi, err)
+	}
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := keepFloor(filepath.Join(dir, "other"), f); err == nil {
+		t.Error("a floor was written into a world-writable directory")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "other")); err == nil {
+		t.Error("the refused floor is on disk")
 	}
 }
 

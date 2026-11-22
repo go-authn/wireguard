@@ -6,10 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-authn/harden/privfile"
 )
 
 // Floor is where a Source's ordering stood: the version and issue time of the
@@ -90,24 +91,9 @@ func loadFloor(path string) (Floor, bool, error) {
 
 // keepFloor writes the floor in one rename, so a crash leaves the old file or
 // the new one, never half of one.
+//
+// The file is written by go-authn/harden's privfile: owner-only, in a directory
+// only its owner can write.
 func keepFloor(path string, f Floor) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp*")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	_, err = tmp.WriteString(floorMagic + "\n" + f.String() + "\n")
-	if err == nil {
-		err = tmp.Sync()
-	}
-	if cerr := tmp.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Rename(name, path)
-	}
-	if err != nil {
-		os.Remove(name)
-	}
-	return err
+	return privfile.Write(path, []byte(floorMagic+"\n"+f.String()+"\n"))
 }
