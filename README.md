@@ -74,7 +74,7 @@ It refuses:
 
 | | why |
 |---|---|
-| a list **older** than one already seen | an old list is signed too, and may list a key taken back since; within its lifetime its signature alone would pass |
+| a list **older** than one already seen (a lower version, or the same version issued earlier) | an old list is signed too, and may list a key taken back since; within its lifetime its signature alone would pass. The newest seen is kept in memory; set `SourceConfig.FloorFile` and it survives a restart (written in one rename; a file that is there but damaged is an error; remove it if the provider's versions restarted). Without it, a restarted gateway takes any still-valid list as the first |
 | a key **listed twice** | whichever a gateway kept, the other person's traffic would arrive under the wrong name |
 | a peer with **no subject** | it belongs to nobody |
 | a key that is not one (see above) | |
